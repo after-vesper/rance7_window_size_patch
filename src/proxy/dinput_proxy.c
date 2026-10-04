@@ -639,8 +639,9 @@ static BOOL WINAPI BitBlt_Hook(HDC dst, int x, int y, int cx, int cy,
                     InsertMenuW(set, pos + 2,
                                 MF_BYPOSITION | MF_STRING,
                                 CMD_RESOLUTION,
-                                L"\x30A6\x30A3\x30F3\x30C9\x30A6"
-                                L"\x30B5\x30A4\x30BA(&Z)...");
+                                L"\xFF73\xFF68\xFF9D\xFF84\xFF9E"
+                                L"\xFF73\xFF7B\xFF72\xFF7D\xFF9E"
+                                L"(&Z)...");
                 }
             }
         }
