@@ -1,6 +1,6 @@
 """Generate embedded_assets.inc: patch files as C byte arrays.
 
-Run from the repository root (tools\package.bat does this)."""
+Run from the repository root (tools/package.bat does this)."""
 import sys
 
 def emit(var, path, out):

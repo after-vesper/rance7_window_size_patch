@@ -16,6 +16,7 @@ for /f "delims=" %%v in ('dir /b /ad /o-n "%SDK%\Include\10.0.*" 2^>nul') do (
     if not defined VER set VER=%%v
 )
 if not defined VER (echo Windows SDK 10 not found & exit /b 1)
+if not exist dist mkdir dist || exit /b 1
 set INC=-I"%SDK%\Include\%VER%\um" -I"%SDK%\Include\%VER%\shared" -I"%SDK%\Include\%VER%\ucrt" -Isrc\installer
 set LIB=/libpath:"%SDK%\Lib\%VER%\um\x86" /libpath:"%SDK%\Lib\%VER%\ucrt\x86"
 
