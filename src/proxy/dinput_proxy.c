@@ -479,8 +479,8 @@ static void build_dialog_template(void)
     p = (WORD *)(t + 1);
     *p++ = 0;
     *p++ = 0;
-    /* "解像度" */
-    p = dlg_put_str(p, L"解像度");
+    /* dialog caption: "window size" */
+    p = dlg_put_str(p, L"ウィンドウサイズ");
     *p++ = 9;
     p = dlg_put_str(p, L"MS UI Gothic");
     p = dlg_item(p, 0x0085,
@@ -629,7 +629,8 @@ static BOOL WINAPI BitBlt_Hook(HDC dst, int x, int y, int cx, int cy,
                     InsertMenuW(set, pos + 2,
                                 MF_BYPOSITION | MF_STRING,
                                 CMD_RESOLUTION,
-                                L"\x89E3\x50CF\x5EA6(&Z)...");
+                                L"\x30A6\x30A3\x30F3\x30C9\x30A6"
+                                L"\x30B5\x30A4\x30BA(&Z)...");
                 }
             }
         }
