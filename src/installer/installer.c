@@ -61,7 +61,7 @@ struct file_entry {
 static const struct file_entry FILES[] = {
     { "dinput.dll", g_dinput, g_dinput_size, 0 },
     { "MultiRes.ini", g_ini, g_ini_size, 1 },
-    { "README.md", g_readme, g_readme_size, 0 },
+    { "README_MultiResPatch.md", g_readme, g_readme_size, 0 },
 };
 
 /* --- Steam library detection -------------------------------------------- */
@@ -305,7 +305,7 @@ int mainCRTStartup(void)
     to_wide(dir, wdir, MAX_PATH);
     wsprintfW(msg,
               L"パッチをインストールしました:\n%s\n\n"
-              L"使い方や設定の詳細は同梱の README.md をご覧"
+              L"使い方や設定の詳細は同梱の README_MultiResPatch.md をご覧"
               L"ください。",
               wdir);
     MessageBoxW(NULL, msg, L"Sengoku Rance Multi-Res Patch",

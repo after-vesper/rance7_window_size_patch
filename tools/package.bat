@@ -29,7 +29,7 @@ set DIST=dist\SengokuRance_MultiResPatch
 if not exist "%DIST%" mkdir "%DIST%" || exit /b 1
 copy /y src\proxy\dinput.dll "%DIST%\" >nul
 copy /y src\proxy\MultiRes.ini "%DIST%\" >nul
-copy /y README.md "%DIST%\README.md" >nul || echo WARN: README missing
+copy /y README.md "%DIST%\README_MultiResPatch.md" >nul || echo WARN: README missing
 
 powershell -NoProfile -Command "Compress-Archive -Force -Path '%DIST%' -DestinationPath 'dist\SengokuRance_MultiResPatch.zip'" || exit /b 1
 echo Packaged to dist\
