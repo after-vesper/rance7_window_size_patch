@@ -8,7 +8,7 @@
  * the final blit is stretched to the configured output size.
  * The game window is resized to match.
  *
- * Config: MultiRes.ini next to the game exe
+ * Config: WindowSize.ini next to the game exe
  *   [Display]
  *   Width  = 1600
  *   Height = 1200
@@ -51,7 +51,7 @@ static void logmsg(const char *s)
     HANDLE f;
     if (!g_log)
         return;
-    f = CreateFileA("multires_log.txt", GENERIC_WRITE, 0, NULL,
+    f = CreateFileA("windowsize_log.txt", GENERIC_WRITE, 0, NULL,
                            OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     DWORD n;
     if (f == INVALID_HANDLE_VALUE) return;
@@ -67,7 +67,17 @@ static void load_config(void)
     DWORD n = GetModuleFileNameA(NULL, path, MAX_PATH);
     while (n && path[n - 1] != '\\') n--;
     path[n] = 0;
-    lstrcatA(path, "MultiRes.ini");
+    /* Prefer WindowSize.ini; fall back to the old MultiRes.ini name so
+       installs made by pre-rename versions keep working. */
+    lstrcatA(path, "WindowSize.ini");
+    if (GetFileAttributesA(path) == INVALID_FILE_ATTRIBUTES) {
+        char old[MAX_PATH];
+        lstrcpyA(old, path);
+        old[lstrlenA(old) - lstrlenA("WindowSize.ini")] = 0;
+        lstrcatA(old, "MultiRes.ini");
+        if (GetFileAttributesA(old) != INVALID_FILE_ATTRIBUTES)
+            lstrcpyA(path, old);
+    }
     lstrcpyA(g_iniPath, path);
     g_outW = GetPrivateProfileIntA("Display", "Width", GAME_W, path);
     g_outH = GetPrivateProfileIntA("Display", "Height", GAME_H, path);
@@ -406,7 +416,7 @@ static void save_resolution(void)
 }
 
 /* Apply a new output resolution immediately and persist it to
-   MultiRes.ini so the same size is used on the next launch. */
+   WindowSize.ini so the same size is used on the next launch. */
 static void apply_resolution(int w, int h)
 {
     g_outW = w;

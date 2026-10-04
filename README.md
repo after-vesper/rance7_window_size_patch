@@ -1,4 +1,4 @@
-# 戦国ランス マルチ解像度パッチ
+# 戦国ランス ウィンドウサイズ変更パッチ
 
 Steam 版 **戦国ランス (Sengoku Rance / Rance 7, 日本語版)** の画面を、固定の 800×600 から解放するパッチです。ウィンドウサイズの変更・自由リサイズ・4K 級のボーダーレス全画面まで、好きなサイズでプレイできます。
 
@@ -12,11 +12,11 @@ Steam 版 **戦国ランス (Sengoku Rance / Rance 7, 日本語版)** の画面�
 
 ## インストール
 
-[Releases](../../releases) から `SengokuRance_MultiResPatch_Setup.exe` をダウンロードして実行するだけです。Steam のゲームフォルダ(app ID `3867170`)を自動検出してファイルを配置します。
+[Releases](../../releases) から `SengokuRance_WindowSizePatch_Setup.exe` をダウンロードして実行するだけです。Steam のゲームフォルダ(app ID `3867170`)を自動検出してファイルを配置します。
 
 > 管理者権限が必要です(`Program Files (x86)\Steam` への書き込みのため)。
 
-手動でインストールしたい場合は、リリース添付の ZIP を使い `dinput.dll` と `MultiRes.ini` を `Rance7.exe` と同じフォルダにコピーしてください。
+手動でインストールしたい場合は、リリース添付の ZIP を使い `dinput.dll` と `WindowSize.ini` を `Rance7.exe` と同じフォルダにコピーしてください。
 
 ## 使い方
 
@@ -27,7 +27,7 @@ Steam 版 **戦国ランス (Sengoku Rance / Rance 7, 日本語版)** の画面�
 | ボーダーレス全画面 | システムメニュー `ﾎﾞｰﾀﾞｰﾚｽﾌﾙｽｸﾘｰﾝ` または `Alt+B` |
 | 通常のフルスクリーン | メニュー / `Alt+Enter`(従来通り、ボーダーレスとは排他) |
 
-## 設定 (`MultiRes.ini`)
+## 設定 (`WindowSize.ini`)
 
 ```ini
 [Display]
@@ -38,12 +38,12 @@ ScaleMode=1      ; 0 = 引き伸ばし / 1 = 4:3維持(黒帯) / 2 = 整数倍
 Fullscreen=0     ; 1 = 起動時にボーダーレス全画面
 
 [Debug]
-Log=0            ; 1 = ゲームフォルダに multires_log.txt を出力
+Log=0            ; 1 = ゲームフォルダに windowsize_log.txt を出力
 ```
 
 ## アンインストール
 
-ゲームフォルダの `dinput.dll` と `MultiRes.ini` を削除してください。ゲーム本体・セーブデータは一切変更されません。
+ゲームフォルダの `dinput.dll` と `WindowSize.ini` を削除してください。ゲーム本体・セーブデータは一切変更されません。
 
 ## 注意事項
 

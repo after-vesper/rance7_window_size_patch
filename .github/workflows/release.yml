@@ -22,6 +22,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/SengokuRance_MultiResPatch_Setup.exe
-            dist/SengokuRance_MultiResPatch.zip
+            dist/SengokuRance_WindowSizePatch_Setup.exe
+            dist/SengokuRance_WindowSizePatch.zip
           generate_release_notes: true
