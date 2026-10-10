@@ -7,3 +7,4 @@ r7.asm
 *.lib
 dist/
 src/installer/embedded_assets.inc
+dump/

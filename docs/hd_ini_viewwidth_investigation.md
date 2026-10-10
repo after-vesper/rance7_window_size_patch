@@ -64,3 +64,44 @@ vtable フックによる座標変換・中間 surface 拡大は断念。
 2. SACT2 のテキスト HLL (SP_SetTextSize 等) をフックしてフォントサイズ×2
 3. 冒頭画面のシーン構築失敗原因を DecodeCG/SurfaceFactory の生成ログで追跡
 4. 全画面巡回テスト（ADV 本文・戦闘・マップ等の固定 800×600 経路洗い出し）
+
+## 追記 (2026-10-10): 冒頭注意文/会社ロゴの 1600×1200 表示 — 成功
+
+### 特定した CG 番号 (Rance7.ain ダンプより)
+
+- `ShowWarningScreen` → CG **64990** (注意文、800×600 黒地テキスト)
+- `ShowCompanyLogo` → CG **64991** (MangaGamer), **64992** (KAGURA)
+- 呼び出し元: `tagLogo@run` → `RunLogos` (FUNC 4497-4499)
+
+### 実機検証結果
+
+`Game_Sample` にて System40.ini=1600×1200 + cg64990-64993 のみ
+2x (Lanczos) に差し替えた GM を投入:
+
+- **注意文: 1600×1200 全面表示を確認** (白画面なし)。`SP_SET_CG` で
+  位置 0,0 に実寸描画されるため、2x 画像がちょうど view 全面を覆う
+- **MangaGamer ロゴも同様に全面表示を確認**
+- タイトル画面は「1x 素材が左上 800×600 相当 + パーティクル (位置は
+  view 比スケール) が全画面」という想定通りの混在状態
+
+### 「白画面」問題の再評価
+
+本テスト (冒頭系 4 枚のみ 2x) では白画面は再現しなかった。
+従来観察された白画面は「冒頭 CG そのもの」ではなく、
+**全量 2x GM に含まれる別のアセット** (恐らく AliceLogo3 プラグイン
+アニメが参照する素材、または別の固定 800×600 経路で使われるもの)
+が原因の可能性が高い。範囲を絞った差し替えで切り分け可能。
+
+### スクショ取得の注意 (4K/150% DPI 環境)
+
+- `CopyFromScreen` では PrintWindow ともに **呼び出し元プロセスの
+  DPI awareness が結果を左右する**。DPI unaware なプロセスから
+  取得した GetClientRect は論理 px (実寸/1.5) を返し、クライアント
+  左上 2/3 しか取れない
+- 対策: PowerShell 側で先に `SetProcessDpiAwarenessContext(-4)`
+  (PER_MONITOR_AWARE_V2) を呼んでから GetClientRect + PrintWindow
+
+### 残タスク (冒頭まわり)
+
+- AliceLogo3.dll プラグインアニメ (ALICESOFT ロゴ) の表示位置/サイズ
+- cg64993 (4枚目、白 800×600 1 枚絵?) の用途確認 — 一応 2x 化済み
