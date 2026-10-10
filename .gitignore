@@ -8,3 +8,4 @@ r7.asm
 dist/
 src/installer/embedded_assets.inc
 dump/
+patch_staging/
