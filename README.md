@@ -37,6 +37,7 @@ Height=960       ; ウィンドウサイズ(縦幅)
 Filter=0         ; 0 = ドット感維持(ニアレスト) / 1 = なめらか(大きい窓では重い)
 ScaleMode=1      ; 0 = 引き伸ばし / 1 = 4:3維持(黒帯) / 2 = 整数倍
 Fullscreen=0     ; 1 = 起動時にボーダーレス全画面
+GpuPresent=1     ; 1 = GPU拡縮(D3D9・サイズ変更が軽い) / 0 = GDI互換モード
 
 [Debug]
 Log=0            ; 1 = ゲームフォルダに windowsize_log.txt を出力
