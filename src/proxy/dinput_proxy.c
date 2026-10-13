@@ -12,20 +12,42 @@
  *   [Display]
  *   Width  = 1600
  *   Height = 1200
- *   Filter = 1    ; 0 = nearest (COLORONCOLOR), 1 = smooth (HALFTONE)
+ *   Filter = 0    ; 0 = nearest (COLORONCOLOR / point),
+ *                 ; 1 = smooth (HALFTONE / bilinear)
  *   ScaleMode = 1 ; 0 = stretch, 1 = keep 4:3 (fractional scale),
  *                 ; 2 = largest integer scale (avoids jitter)
+ *   GpuPresent = 1 ; 1 = D3D9Ex GPU present (scaling is free),
+ *                  ; 0 = GDI StretchBlt software path
  */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdlib.h>
 #include <string.h>
 #include <tlhelp32.h>
+#include <d3d9.h>
 
 static int strncmp_l(const char *x, const char *y, int n)
 {
     while (n-- > 0 && *x && *x == *y) { x++; y++; }
     return n < 0 ? 0 : (unsigned char)*x - (unsigned char)*y;
+}
+
+/* CRT 無しビルドのため最低限のランタイムを自前提供する */
+int _fltused = 1;
+void *memcpy(void *d, const void *s, size_t n)
+{
+    DWORD *dd = (DWORD *)d;
+    const DWORD *ss = (const DWORD *)s;
+    size_t q = n / 4;
+    while (q--)
+        *dd++ = *ss++;
+    {
+        BYTE *db = (BYTE *)dd;
+        const BYTE *sb = (const BYTE *)ss;
+        for (n &= 3; n--; )
+            *db++ = *sb++;
+    }
+    return d;
 }
 
 static int g_viewW = 800;
@@ -44,6 +66,7 @@ static int g_borderless_applied;
 static int g_appliedW, g_appliedH;
 static int g_sizing;
 static int g_log;
+static int g_gpu;               /* [Display] GpuPresent */
 /* HD バックバッファ実験用 */
 static int g_renderscale;
 static HDC g_dib_dc;
@@ -118,6 +141,7 @@ static void load_config(void)
     g_mode = GetPrivateProfileIntA("Display", "ScaleMode", 1, path);
     g_full = GetPrivateProfileIntA("Display", "Fullscreen", 0, path);
     g_log = GetPrivateProfileIntA("Debug", "Log", 0, path);
+    g_gpu = GetPrivateProfileIntA("Display", "GpuPresent", 1, path);
     /* HD 実験: バックバッファだけを N 倍 DIB に差し替える。
        座標変換は行わず、まずエンジンの動作を観察する。 */
     g_renderscale = GetPrivateProfileIntA("HD", "RenderScale", 0, path);
@@ -649,14 +673,187 @@ static void show_resolution_dialog(void)
 static HDC g_backDC;
 static HBITMAP g_backBmp;
 static HGDIOBJ g_backOld;
+static void *g_back_bits;       /* DIB ピクセル (D3D 転送用) */
+static DWORD g_back_pitch;
 
 static void ensure_backbuffer(HDC dst)
 {
+    BITMAPINFO bi;
     if (g_backDC)
         return;
+    /* 32bpp トップダウン DIB。GDI 転送先として使えて、ピクセルへ
+       直接アクセスできる (D3D テクスチャへの転送用) */
     g_backDC = CreateCompatibleDC(dst);
-    g_backBmp = CreateCompatibleBitmap(dst, GAME_W, GAME_H);
+    ZeroMemory(&bi, sizeof(bi));
+    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bi.bmiHeader.biWidth = GAME_W;
+    bi.bmiHeader.biHeight = -GAME_H;
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+    g_backBmp = CreateDIBSection(dst, &bi, DIB_RGB_COLORS,
+                                 &g_back_bits, NULL, 0);
+    g_back_pitch = GAME_W * 4;
     g_backOld = SelectObject(g_backDC, g_backBmp);
+}
+
+/* --- D3D9 プレゼンター ---------------------------------------------------
+   ミラー済みフレームをテクスチャへ転送し、フル画面クアッドを 1 枚
+   描いて Present する。拡縮は GPU のサンプラーが行うので、出力
+   サイズに関わらず CPU コストはほぼフレーム 1 枚分のコピーのみ。
+   初期化に失敗した環境、およびデバイスロスト中のフレームは従来の
+   GDI 経路へフォールバックする (フック内で常にどちらか一方が
+   クライアント領域全体を担当するので両者の描画は混ざらない)。 */
+
+static IDirect3D9Ex *g_d3d;
+static IDirect3DDevice9Ex *g_d3ddev;
+static IDirect3DTexture9 *g_d3dtex;
+static int g_d3dW, g_d3dH;      /* swapchain (=クライアント) サイズ */
+static int g_d3d_lost;
+static int g_d3d_failed;        /* 作成失敗 → 以降 GDI 固定 */
+
+typedef struct { float x, y, z, rhw, u, v; } QVERTEX;
+#define QVF (D3DFVF_XYZRHW | D3DFVF_TEX1)
+
+static void d3d_fill_pp(D3DPRESENT_PARAMETERS *pp, const RECT *rc)
+{
+    ZeroMemory(pp, sizeof(*pp));
+    pp->BackBufferWidth = rc->right;
+    pp->BackBufferHeight = rc->bottom;
+    pp->BackBufferFormat = D3DFMT_X8R8G8B8;
+    pp->BackBufferCount = 1;
+    pp->SwapEffect = D3DSWAPEFFECT_DISCARD;
+    pp->hDeviceWindow = g_hwnd;
+    pp->Windowed = TRUE;
+    pp->PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
+}
+
+/* テクスチャ作成と描画状態の設定 (作成直後と Reset 後で共通) */
+static int d3d_make_target(void)
+{
+    if (FAILED(g_d3ddev->lpVtbl->CreateTexture(
+            g_d3ddev, GAME_W, GAME_H, 1, D3DUSAGE_DYNAMIC,
+            D3DFMT_X8R8G8B8, D3DPOOL_DEFAULT, &g_d3dtex, NULL)))
+        return 0;
+    g_d3ddev->lpVtbl->SetRenderState(g_d3ddev, D3DRS_LIGHTING, FALSE);
+    g_d3ddev->lpVtbl->SetRenderState(g_d3ddev, D3DRS_CULLMODE,
+                                   D3DCULL_NONE);
+    g_d3ddev->lpVtbl->SetRenderState(g_d3ddev, D3DRS_ZENABLE,
+                                   D3DZB_FALSE);
+    g_d3ddev->lpVtbl->SetFVF(g_d3ddev, QVF);
+    return 1;
+}
+
+/* デバイスの確保。クライアントサイズ変化・ロスト時は Reset する。
+   使えない/ロスト中は 0 を返し、呼び出し側は GDI で描く */
+static int d3d_ensure(void)
+{
+    RECT rc;
+    D3DPRESENT_PARAMETERS pp;
+    HRESULT hr;
+    if (!g_gpu || g_d3d_failed || !g_hwnd)
+        return 0;
+    GetClientRect(g_hwnd, &rc);
+    if (rc.right <= 0 || rc.bottom <= 0)
+        return 0;
+    if (!g_d3ddev) {
+        if (!g_d3d &&
+            FAILED(Direct3DCreate9Ex(D3D_SDK_VERSION, &g_d3d))) {
+            g_d3d_failed = 1;
+            return 0;
+        }
+        d3d_fill_pp(&pp, &rc);
+        /* FPU_PRESERVE: D3D は既定で FPU 精度を下げるので、
+           x87 演算に依存する古いエンジンへの影響を防ぐ */
+        hr = g_d3d->lpVtbl->CreateDeviceEx(
+            g_d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, g_hwnd,
+            D3DCREATE_HARDWARE_VERTEXPROCESSING |
+            D3DCREATE_NOWINDOWCHANGES | D3DCREATE_FPU_PRESERVE,
+            &pp, NULL, &g_d3ddev);
+        if (FAILED(hr) || !d3d_make_target()) {
+            if (g_d3ddev) {
+                g_d3ddev->lpVtbl->Release(g_d3ddev);
+                g_d3ddev = NULL;
+            }
+            g_d3d_failed = 1;
+            return 0;
+        }
+        g_d3dW = rc.right;
+        g_d3dH = rc.bottom;
+        logmsg("d3d: device created");
+        return 1;
+    }
+    if (g_d3d_lost || rc.right != g_d3dW || rc.bottom != g_d3dH) {
+        if (g_d3dtex) {
+            g_d3dtex->lpVtbl->Release(g_d3dtex);
+            g_d3dtex = NULL;
+        }
+        d3d_fill_pp(&pp, &rc);
+        /* ロスト継続中は Reset が DEVICELOST を返す。その間は
+           GDI が描画を担当するのでここは諦めるだけでよい */
+        if (FAILED(g_d3ddev->lpVtbl->ResetEx(g_d3ddev, &pp, NULL)) ||
+            !d3d_make_target()) {
+            g_d3d_lost = 1;
+            return 0;
+        }
+        g_d3dW = rc.right;
+        g_d3dH = rc.bottom;
+        g_d3d_lost = 0;
+    }
+    return 1;
+}
+
+/* ミラー DIB の内容を viewport へ present する。0 = GDI で描くべき */
+static int d3d_present(const RECT *vp)
+{
+    D3DLOCKED_RECT lr;
+    QVERTEX q[4];
+    HRESULT hr;
+    int y;
+    if (!d3d_ensure())
+        return 0;
+    hr = g_d3dtex->lpVtbl->LockRect(g_d3dtex, 0, &lr, NULL,
+                                    D3DLOCK_DISCARD);
+    if (FAILED(hr))
+        return 0;
+    for (y = 0; y < GAME_H; y++)
+        memcpy((BYTE *)lr.pBits + y * lr.Pitch,
+               (BYTE *)g_back_bits + y * g_back_pitch, GAME_W * 4);
+    g_d3dtex->lpVtbl->UnlockRect(g_d3dtex, 0);
+    /* RHW 座標はクライアント基準のピクセル単位。テクセル中心を
+       合わせるため -0.5 のオフセットを入れる */
+    q[0].x = (float)vp->left - 0.5f;
+    q[0].y = (float)vp->top - 0.5f;
+    q[0].z = 0; q[0].rhw = 1; q[0].u = 0; q[0].v = 0;
+    q[1].x = (float)vp->right - 0.5f;
+    q[1].y = (float)vp->top - 0.5f;
+    q[1].z = 0; q[1].rhw = 1; q[1].u = 1; q[1].v = 0;
+    q[2].x = (float)vp->left - 0.5f;
+    q[2].y = (float)vp->bottom - 0.5f;
+    q[2].z = 0; q[2].rhw = 1; q[2].u = 0; q[2].v = 1;
+    q[3].x = (float)vp->right - 0.5f;
+    q[3].y = (float)vp->bottom - 0.5f;
+    q[3].z = 0; q[3].rhw = 1; q[3].u = 1; q[3].v = 1;
+    g_d3ddev->lpVtbl->Clear(g_d3ddev, 0, NULL, D3DCLEAR_TARGET,
+                            0xff000000, 1.0f, 0);
+    if (FAILED(g_d3ddev->lpVtbl->BeginScene(g_d3ddev)))
+        return 0;
+    g_d3ddev->lpVtbl->SetTexture(g_d3ddev, 0,
+        (IDirect3DBaseTexture9 *)g_d3dtex);
+    /* Filter 設定はサンプラーに対応 */
+    g_d3ddev->lpVtbl->SetSamplerState(g_d3ddev, 0, D3DSAMP_MAGFILTER,
+        g_smooth ? D3DTEXF_LINEAR : D3DTEXF_POINT);
+    g_d3ddev->lpVtbl->SetSamplerState(g_d3ddev, 0, D3DSAMP_MINFILTER,
+        g_smooth ? D3DTEXF_LINEAR : D3DTEXF_POINT);
+    g_d3ddev->lpVtbl->DrawPrimitiveUP(g_d3ddev, D3DPT_TRIANGLESTRIP,
+                                      2, q, sizeof(QVERTEX));
+    g_d3ddev->lpVtbl->EndScene(g_d3ddev);
+    hr = g_d3ddev->lpVtbl->Present(g_d3ddev, NULL, NULL, NULL, NULL);
+    if (hr == D3DERR_DEVICELOST) {
+        g_d3d_lost = 1;
+        return 0;
+    }
+    return SUCCEEDED(hr);
 }
 
 /* StretchBlt 経路の観察用: 何も変えずにログだけ取る */
@@ -793,6 +990,17 @@ static BOOL WINAPI BitBlt_Hook(HDC dst, int x, int y, int cx, int cy,
                                   GAME_W * g_renderscale,
                                   GAME_H * g_renderscale,
                                   SRCCOPY);
+            }
+            /* GPU present: フックした blit を全てミラー DIB へ 1:1
+               で写し、その内容をテクスチャ経由で Present する。
+               拡縮は GPU 任せなのでサイズによらず軽い。失敗した
+               フレームだけ従来の GDI 経路へ落ちる。 */
+            if (g_gpu && !g_d3d_failed) {
+                ensure_backbuffer(dst);
+                g_origBitBlt(g_backDC, x, y, cx, cy,
+                             src, sx, sy, rop);
+                if (d3d_present(&vp))
+                    return TRUE;
             }
             /* 黒帯を毎回塗り直す。クラスの背景ブラシが消してしまう
                ため。viewport の内側はこれ以降の転送が上書きする。 */
