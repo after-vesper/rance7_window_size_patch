@@ -114,7 +114,7 @@ static void load_config(void)
     lstrcpyA(g_iniPath, path);
     g_outW = GetPrivateProfileIntA("Display", "Width", GAME_W, path);
     g_outH = GetPrivateProfileIntA("Display", "Height", GAME_H, path);
-    g_smooth = GetPrivateProfileIntA("Display", "Filter", 1, path);
+    g_smooth = GetPrivateProfileIntA("Display", "Filter", 0, path);
     g_mode = GetPrivateProfileIntA("Display", "ScaleMode", 1, path);
     g_full = GetPrivateProfileIntA("Display", "Fullscreen", 0, path);
     g_log = GetPrivateProfileIntA("Debug", "Log", 0, path);
@@ -760,9 +760,11 @@ static BOOL WINAPI BitBlt_Hook(HDC dst, int x, int y, int cx, int cy,
         if (w && g_hwnd && w == g_hwnd && g_enabled &&
             !native_fullscreen()) {
             RECT vp;
+            int vw, vh;
             ensure_window_size();
-            ensure_backbuffer(dst);
             get_viewport(&vp);
+            vw = vp.right - vp.left;
+            vh = vp.bottom - vp.top;
             if (g_renderscale > 1 && g_dib_dc) {
                 /* HD モード: 差し替えた N 倍 DIB をそのまま表示。
                    ゲーム側 srcDC は旧バッファを指すため使わない。 */
@@ -792,10 +794,8 @@ static BOOL WINAPI BitBlt_Hook(HDC dst, int x, int y, int cx, int cy,
                                   GAME_H * g_renderscale,
                                   SRCCOPY);
             }
-            /* Mirror the update into the logical back buffer. */
-            g_origBitBlt(g_backDC, x, y, cx, cy, src, sx, sy, rop);
-            /* Paint the letterbox/pillarbox bars black. The class
-               background brush can erase them, so repaint each frame. */
+            /* 黒帯を毎回塗り直す。クラスの背景ブラシが消してしまう
+               ため。viewport の内側はこれ以降の転送が上書きする。 */
             {
                 RECT rc;
                 GetClientRect(w, &rc);
@@ -812,13 +812,36 @@ static BOOL WINAPI BitBlt_Hook(HDC dst, int x, int y, int cx, int cy,
                            vp.right - vp.left,
                            rc.bottom - vp.bottom, BLACKNESS);
             }
+            /* 等倍 fast path: ミラーと StretchBlt を介さず直接
+               転送する。HD (ViewWidth>800) 環境ではここが主経路。 */
+            if (vw == GAME_W && vh == GAME_H &&
+                x >= 0 && y >= 0 &&
+                x + cx <= GAME_W && y + cy <= GAME_H)
+                return g_origBitBlt(dst, vp.left + x, vp.top + y,
+                                    cx, cy, src, sx, sy, rop);
+            /* 全画面 present fast path: ソースが完成済みフレーム
+               なのでミラーを介さず直接スケーリングする。部分更新と
+               違い継ぎ目の心配が無い。 */
+            if (x == 0 && y == 0 && sx == 0 && sy == 0 &&
+                cx == GAME_W && cy == GAME_H) {
+                SetStretchBltMode(dst,
+                                  g_smooth ? HALFTONE : COLORONCOLOR);
+                if (g_smooth)
+                    SetBrushOrgEx(dst, 0, 0, NULL);
+                return StretchBlt(dst, vp.left, vp.top, vw, vh,
+                                  src, 0, 0, GAME_W, GAME_H, rop);
+            }
+            /* 部分更新: 論理バックバッファへミラーしてから全体を
+               引き伸ばす (部分 StretchBlt の丸め誤差で生じる
+               継ぎ目を避けるため) */
+            ensure_backbuffer(dst);
+            g_origBitBlt(g_backDC, x, y, cx, cy, src, sx, sy, rop);
             SetStretchBltMode(dst, g_smooth ? HALFTONE : COLORONCOLOR);
             if (g_smooth)
                 /* Keep a fixed halftone phase: per-blit origins shift
                    the dither pattern and show up as shimmer. */
                 SetBrushOrgEx(dst, 0, 0, NULL);
-            return StretchBlt(dst, vp.left, vp.top,
-                              vp.right - vp.left, vp.bottom - vp.top,
+            return StretchBlt(dst, vp.left, vp.top, vw, vh,
                               g_backDC, 0, 0, GAME_W, GAME_H, SRCCOPY);
         }
     }
